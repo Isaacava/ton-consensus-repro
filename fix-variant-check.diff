@@ -1,0 +1,21 @@
+*** a/validator/consensus/block-validator.cpp
+@@
+-    if (validation_result.has()) {
+-      if (event->candidate->leader == bus.local_id.idx) {
+-        LOG(ERROR) << "BUG! Candidate " << event->candidate->id << " is self-rejected: " << validation_result.get().reason;
+-      }
+-      co_return validation_result;
+-    }
+-    td::Timestamp ok_from = td::Timestamp::at_unix(validation_result.get().ok_from_utime);
++    // validation_result is td::Variant<CandidateAccept, CandidateReject>.
++    // Check explicitly for CandidateReject and handle it; otherwise treat it as accept.
++    if (validation_result.has<CandidateReject>()) {
++      const auto &rej = validation_result.get<CandidateReject>();
++      if (event->candidate->leader == bus.local_id.idx) {
++        LOG(ERROR) << "BUG! Candidate " << event->candidate->id << " is self-rejected: " << rej.reason;
++      }
++      co_return validation_result;
++    }
++    // now we know it's CandidateAccept
++    const auto &acc = validation_result.get<CandidateAccept>();
++    td::Timestamp ok_from = td::Timestamp::at_unix(acc.ok_from_utime);

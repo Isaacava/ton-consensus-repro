@@ -1,0 +1,111 @@
+name: ton-consensus-repro
+
+on:
+  workflow_dispatch:
+
+jobs:
+  repro:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout this repo (contains patches & scripts)
+        uses: actions/checkout@v4
+
+      - name: Checkout TON testnet repo into ./ton
+        uses: actions/checkout@v4
+        with:
+          repository: ton-blockchain/ton
+          ref: testnet
+          path: ton
+
+      - name: Show commit checked out
+        run: |
+          cd ton
+          git rev-parse --verify HEAD > ../ton-commit.txt
+          echo "TON testnet commit:"
+          cat ../ton-commit.txt
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build pkg-config git libssl-dev libsodium-dev libcurl4-openssl-dev
+          export MAKEFLAGS="-j2"
+
+      - name: Copy patches and script into ton workspace
+        run: |
+          cp instrument-variant-log.diff ton/ || true
+          cp fix-variant-check.diff ton/ || true
+          cp run-cluster-ci.sh ton/ || true
+          ls -la ton
+
+      - name: Apply instrumentation patch & build (pre-fix)
+        working-directory: ton
+        run: |
+          if git apply instrument-variant-log.diff; then
+            echo "instrument patch applied"
+          else
+            echo "patch apply failed; aborting"
+            exit 1
+          fi
+          mkdir -p build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release || true
+          cmake --build . -- -j2 || true
+          ls -la || true
+
+      - name: Run cluster pre-fix and collect logs
+        working-directory: ton
+        run: |
+          chmod +x run-cluster-ci.sh
+          ./run-cluster-ci.sh prefix || true
+          mkdir -p ../artifacts_prefix
+          cp -r local-cluster/logs ../artifacts_prefix/ || true
+          echo "GREP results (pre-fix):"
+          grep -R "BUG! Candidate" -n local-cluster/logs || true
+          grep -R "INSTRUMENT: validation_result" -n local-cluster/logs || true
+
+      - name: Upload pre-fix logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: ton-evidence-prefix
+          path: ton/artifacts_prefix
+
+      - name: Apply fix patch & build (post-fix)
+        working-directory: ton
+        run: |
+          git checkout -- .
+          if git apply fix-variant-check.diff; then
+            echo "fix patch applied"
+          else
+            echo "fix apply failed; aborting"
+            exit 1
+          fi
+          rm -rf build || true
+          mkdir -p build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release || true
+          cmake --build . -- -j2 || true
+          ls -la || true
+
+      - name: Run cluster post-fix and collect logs
+        working-directory: ton
+        run: |
+          chmod +x run-cluster-ci.sh
+          ./run-cluster-ci.sh postfix || true
+          mkdir -p ../artifacts_postfix
+          cp -r local-cluster/logs ../artifacts_postfix/ || true
+          echo "GREP results (post-fix):"
+          grep -R "BUG! Candidate" -n local-cluster/logs || true
+          grep -R "INSTRUMENT: validation_result" -n local-cluster/logs || true
+
+      - name: Upload post-fix logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: ton-evidence-postfix
+          path: ton/artifacts_postfix
+
+      - name: Upload commit hash used
+        uses: actions/upload-artifact@v4
+        with:
+          name: ton-commit
+          path: ton-commit.txt

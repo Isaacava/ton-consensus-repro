@@ -1,0 +1,32 @@
+*** a/validator/consensus/block-validator.cpp
+@@
+-    if (validation_result.has()) {
+-      if (event->candidate->leader == bus.local_id.idx) {
+-        LOG(ERROR) << "BUG! Candidate " << event->candidate->id << " is self-rejected: " << validation_result.get().reason;
+-      }
+-      co_return validation_result;
+-    }
+-    td::Timestamp ok_from = td::Timestamp::at_unix(validation_result.get().ok_from_utime);
++    // INSTRUMENTATION: Log which variant we received so we can prove the wrong branch was taken.
++    if (validation_result.has()) {
++      try {
++        if (validation_result.has<CandidateReject>()) {
++          const auto &rej = validation_result.get<CandidateReject>();
++          LOG(ERROR) << "INSTRUMENT: validation_result is CandidateReject, reason=" << rej.reason;
++        } else if (validation_result.has<CandidateAccept>()) {
++          const auto &acc = validation_result.get<CandidateAccept>();
++          LOG(ERROR) << "INSTRUMENT: validation_result is CandidateAccept, ok_from_utime=" << acc.ok_from_utime;
++        } else {
++          LOG(ERROR) << "INSTRUMENT: validation_result has() true but type unknown";
++        }
++      } catch (...) {
++        LOG(ERROR) << "INSTRUMENT: exception while inspecting validation_result";
++      }
++
++      // Keep the current (buggy) early-return path so we can capture the self-reject during pre-fix run.
++      if (event->candidate->leader == bus.local_id.idx) {
++        LOG(ERROR) << "BUG! Candidate " << event->candidate->id << " is self-rejected: " << validation_result.get().reason;
++      }
++      co_return validation_result;
++    }
++    td::Timestamp ok_from = td::Timestamp::at_unix(validation_result.get().ok_from_utime);
