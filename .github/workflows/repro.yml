@@ -6,44 +6,77 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
+
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
       - name: Clone TON repository
         run: |
           git clone https://github.com/ton-blockchain/ton.git
           cd ton
           git checkout testnet
+          echo "TON Commit:"
           git rev-parse HEAD
 
       - name: Install dependencies
         run: |
-          sudo apt update
-          sudo apt install -y build-essential cmake ninja-build libsodium-dev libssl-dev
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            git \
+            pkg-config \
+            clang \
+            libssl-dev \
+            openssl \
+            libsodium-dev \
+            zlib1g-dev \
+            liblz4-dev \
+            libbz2-dev
 
-      - name: Build TON validator
+      - name: Verify OpenSSL installation
+        run: |
+          openssl version
+          pkg-config --libs openssl
+
+      - name: Configure build
         run: |
           cd ton
           mkdir build
           cd build
-          cmake ..
-          make -j2
+          cmake .. -DCMAKE_BUILD_TYPE=Release
 
-      - name: Inspect consensus validator code
+      - name: Build TON validator
+        run: |
+          cd ton/build
+          cmake --build . -- -j2
+
+      - name: Locate validator binaries
         run: |
           cd ton
-          echo "Searching consensus code..."
-          grep -R "validation_result" validator/consensus || true
-          grep -R "CandidateReject" validator/consensus || true
-          grep -R "CandidateAccept" validator/consensus || true
+          echo "Searching for validator binaries..."
+          find . -type f -executable | grep validator || true
 
-      - name: Save consensus code snapshot
+      - name: Inspect consensus code
+        run: |
+          cd ton
+          echo "Scanning consensus logic..."
+          grep -R "CandidateAccept" validator/consensus || true
+          grep -R "CandidateReject" validator/consensus || true
+          grep -R "validation_result" validator/consensus || true
+
+      - name: Prepare proof files
         run: |
           cd ton
           mkdir proof
           cp validator/consensus/*.cpp proof/ || true
           cp validator/consensus/*.h proof/ || true
 
-      - name: Upload proof files
+      - name: Upload consensus proof
         uses: actions/upload-artifact@v4
         with:
           name: consensus-proof
