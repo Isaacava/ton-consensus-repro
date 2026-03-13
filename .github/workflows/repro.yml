@@ -6,7 +6,7 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
 
@@ -32,51 +32,53 @@ jobs:
             pkg-config \
             clang \
             libssl-dev \
-            openssl \
             libsodium-dev \
             zlib1g-dev \
             liblz4-dev \
             libbz2-dev
 
-      - name: Verify OpenSSL installation
+      - name: Show OpenSSL location
         run: |
+          which openssl
           openssl version
-          pkg-config --libs openssl
+          pkg-config --modversion openssl
+          ls /usr/include/openssl
 
-      - name: Configure build
+      - name: Configure build (force system OpenSSL)
         run: |
           cd ton
           mkdir build
           cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOPENSSL_ROOT_DIR=/usr \
+            -DOPENSSL_INCLUDE_DIR=/usr/include \
+            -DOPENSSL_LIBRARIES=/usr/lib/x86_64-linux-gnu
 
-      - name: Build TON validator
+      - name: Build validator
         run: |
           cd ton/build
           cmake --build . -- -j2
 
-      - name: Locate validator binaries
+      - name: Search consensus code
         run: |
           cd ton
-          echo "Searching for validator binaries..."
-          find . -type f -executable | grep validator || true
+          echo "Consensus files:"
+          ls validator/consensus
 
-      - name: Inspect consensus code
-        run: |
-          cd ton
-          echo "Scanning consensus logic..."
+          echo "Searching key logic..."
           grep -R "CandidateAccept" validator/consensus || true
           grep -R "CandidateReject" validator/consensus || true
           grep -R "validation_result" validator/consensus || true
 
-      - name: Prepare proof files
+      - name: Save consensus proof
         run: |
           cd ton
           mkdir proof
           cp validator/consensus/*.cpp proof/ || true
           cp validator/consensus/*.h proof/ || true
 
-      - name: Upload consensus proof
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: consensus-proof
